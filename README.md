@@ -3,28 +3,36 @@
 Sweep up the markdown your coding agents leave behind.
 
 If you run Claude Code (or any coding agent) daily, your repos accumulate
-`SUMMARY.md`, `PLAN.md`, `HANDOFF.md`, `FINDINGS_V2.md` — session artifacts that
-were useful for exactly one task. The problem isn't disk space. It's that
-future agent sessions read those stale files as if they were current project
-truth, and the noise compounds: yesterday's abandoned plan becomes tomorrow's
-context. This is a known pain point in agent workflows (see
-anthropics/claude-code#6648).
+`SUMMARY.md`, `PLAN.md`, `HANDOFF.md`, `FINDINGS_V2.md`: session artifacts that
+were useful for exactly one task. The real cost is not disk space. Future
+agent sessions read those stale files as current project truth, and the noise
+compounds: yesterday's abandoned plan becomes tomorrow's context. This is a
+known pain point in agent workflows (see anthropics/claude-code#6648).
 
-mdsweep finds these artifacts, grades them by risk, and — only if you ask —
-moves the dead ones into a reversible quarantine. It does one thing, in one
+mdsweep finds these artifacts, grades them by risk, and moves the dead ones
+into a reversible quarantine only when you ask. It does one thing, in one
 file, with zero dependencies.
 
-<!-- DOGFOOD_NUMBERS -->
+## Numbers from the repos it was built in
+
+First run across the author's own 14 repositories (a one-person company
+group running Claude Code agents daily):
+
+- 1,879 markdown/text files scanned, in under 5 seconds
+- 317 flagged as agent artifacts
+- 170 of those (54%) stale or orphaned
+- 115 orphans (~0.9 MB) eligible for reversible quarantine
+
+The conservative side matters just as much: on the hottest repo, 130 of 139
+markdown files are agent-written, and mdsweep quarantines none of them,
+because they are all in active use.
 
 ## Install
 
-```sh
-npm install -g mdsweep     # or: npx mdsweep
-```
-
-Or just clone and run — it's a single file with no dependencies:
+Clone and run. It is a single file with no dependencies:
 
 ```sh
+git clone https://github.com/USER/mdsweep && cd mdsweep
 node bin/mdsweep.mjs scan ~/code/my-repo
 ```
 
@@ -69,18 +77,18 @@ Flagged 4: 2 orphan (16K) · 1 stale · 1 active
 An inbound reference means some tracked text file in the repo mentions the
 artifact's filename (Obsidian-style `[[wikilinks]]` count too). A stale plan
 that `CLAUDE.md` still points at is a problem you should resolve by editing,
-not by deleting — mdsweep will show it but won't touch it.
+not by deleting. mdsweep shows it and leaves it alone.
 
 ## How artifacts are detected
 
 Three signals, any one is enough; every hit records which signals fired:
 
-1. **Filename patterns** — `SUMMARY*`, `PLAN*`, `HANDOFF*`, `*_REPORT.md`,
+1. **Filename patterns**: `SUMMARY*`, `PLAN*`, `HANDOFF*`, `*_REPORT.md`,
    `DRAFT*`, `SCRATCH*`, `*_V2.md`, and ~20 more (only `.md`/`.txt`/`.scratch`
    files are ever considered).
-2. **Git signals** — the file's history contains a
+2. **Git signals**: the file's history contains a
    `Co-Authored-By: Claude` trailer, or the file is untracked.
-3. **Frontmatter** — YAML frontmatter marks it generated
+3. **Frontmatter**: YAML frontmatter marks it generated
    (`generated_by: claude-code`, `author: agent`, ...).
 
 Never flagged, regardless of signals: `README.md`, `CHANGELOG.md`,
@@ -89,7 +97,7 @@ Never flagged, regardless of signals: `README.md`, `CHANGELOG.md`,
 `ads.txt`. Directories owned by a site generator are published product, not
 session artifacts, so they're skipped too: `docs/` when a mkdocs, Docusaurus,
 Sphinx, or VitePress config is present; `content/` for Astro, Hugo, Gatsby,
-Eleventy; `_posts/` for Jekyll. `public/` and `static/` are skipped —
+Eleventy; `_posts/` for Jekyll. `public/` and `static/` are skipped:
 web-served assets like search-engine verification tokens live there.
 `node_modules`, build output, hidden directories, and nested git repos are
 also skipped.
@@ -120,9 +128,9 @@ Optional `.mdsweep.json` in the repo root:
 }
 ```
 
-- `days` — active threshold (CLI `--days` wins).
-- `patterns.add` / `patterns.remove` — adjust the filename globs.
-- `exclude` — path globs that are never flagged.
+- `days`: active threshold (CLI `--days` wins).
+- `patterns.add` / `patterns.remove`: adjust the filename globs.
+- `exclude`: path globs that are never flagged.
 
 ## Claude Code skill
 
