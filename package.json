@@ -1,0 +1,30 @@
+{
+  "name": "mdsweep",
+  "version": "0.1.0",
+  "description": "Find, grade, and safely quarantine the markdown artifacts coding agents leave behind (SUMMARY.md, PLAN.md, scratch notes...). Read-only by default, never deletes, one-command undo.",
+  "type": "module",
+  "bin": {
+    "mdsweep": "bin/mdsweep.mjs"
+  },
+  "files": [
+    "bin",
+    "skill",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "bash test/smoke.sh"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "claude-code",
+    "agents",
+    "markdown",
+    "cleanup",
+    "cli",
+    "repo-hygiene"
+  ],
+  "license": "MIT"
+}
