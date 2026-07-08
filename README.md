@@ -89,8 +89,10 @@ Never flagged, regardless of signals: `README.md`, `CHANGELOG.md`,
 `ads.txt`. Directories owned by a site generator are published product, not
 session artifacts, so they're skipped too: `docs/` when a mkdocs, Docusaurus,
 Sphinx, or VitePress config is present; `content/` for Astro, Hugo, Gatsby,
-Eleventy; `_posts/` for Jekyll. `node_modules`, build output, hidden
-directories, and nested git repos are also skipped.
+Eleventy; `_posts/` for Jekyll. `public/` and `static/` are skipped —
+web-served assets like search-engine verification tokens live there.
+`node_modules`, build output, hidden directories, and nested git repos are
+also skipped.
 
 ## Safety guarantees
 

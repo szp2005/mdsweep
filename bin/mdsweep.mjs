@@ -37,6 +37,8 @@ const PROTECTED_BASENAMES = new Set([
 const SKIP_DIRS = new Set([
   'node_modules', 'dist', 'build', 'out', 'vendor', 'venv', 'coverage',
   'target', '__pycache__', 'third_party', 'Pods', 'DerivedData',
+  // web-served assets: verification tokens, ads.txt & co. live here
+  'public', 'static',
 ]);
 
 // Files that mention filenames without meaning them.
