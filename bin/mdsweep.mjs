@@ -31,7 +31,7 @@ const DEFAULT_PATTERNS = [
 const PROTECTED_BASENAMES = new Set([
   'readme.md', 'changelog.md', 'contributing.md', 'code_of_conduct.md',
   'security.md', 'claude.md', 'claude.local.md', 'agents.md', 'skill.md',
-  'memory.md', 'llms.txt', 'robots.txt',
+  'memory.md', 'llms.txt', 'robots.txt', 'ads.txt', 'app-ads.txt',
 ]);
 
 const SKIP_DIRS = new Set([
@@ -226,13 +226,22 @@ function inSkippedDir(rel) {
   return rel.split('/').some((seg) => SKIP_DIRS.has(seg) || seg === '.mdsweep');
 }
 
-// If a docs-site generator owns docs/, leave that tree alone.
-function docsSitePresent(root) {
-  const markers = [
-    'mkdocs.yml', 'mkdocs.yaml', 'docusaurus.config.js', 'docusaurus.config.ts',
-    'docusaurus.config.mjs', 'docs/conf.py', 'docs/source/conf.py', 'docs/.vitepress',
-  ];
-  return markers.some((m) => fs.existsSync(path.join(root, m)));
+// Directories owned by a site generator hold published product, not
+// session artifacts — leave them alone when the generator's config exists.
+function generatorOwnedDirs(root) {
+  const owned = [];
+  const has = (...files) => files.some((f) => fs.existsSync(path.join(root, f)));
+  if (has('mkdocs.yml', 'mkdocs.yaml', 'docusaurus.config.js', 'docusaurus.config.ts',
+    'docusaurus.config.mjs', 'docs/conf.py', 'docs/source/conf.py', 'docs/.vitepress')) {
+    owned.push('docs/');
+  }
+  if (has('astro.config.mjs', 'astro.config.ts', 'astro.config.js', 'hugo.toml',
+    'hugo.yaml', 'config.toml', 'gatsby-config.js', 'gatsby-config.ts',
+    '.eleventy.js', 'eleventy.config.js')) {
+    owned.push('content/');
+  }
+  if (has('_config.yml')) owned.push('_posts/');
+  return owned;
 }
 
 // -------------------------------------------------------------- frontmatter
@@ -272,7 +281,7 @@ function runScan(root, opts) {
   const { files, nestedRepos, warnings } = walkTree(root);
   const patterns = cfg.patterns.map((p) => [p, globToRegExp(p)]);
   const excludes = cfg.exclude.map((g) => globToRegExp(g, { matchPath: true }));
-  const skipDocs = docsSitePresent(root);
+  const ownedDirs = generatorOwnedDirs(root);
   const now = Date.now();
 
   let scanned = 0;
@@ -283,7 +292,7 @@ function runScan(root, opts) {
     const base = path.basename(rel);
     const baseLower = base.toLowerCase();
     if (PROTECTED_BASENAMES.has(baseLower) || baseLower.startsWith('license')) continue;
-    if (skipDocs && rel.startsWith('docs/')) continue;
+    if (ownedDirs.some((d) => rel.startsWith(d))) continue;
     if (excludes.some((re) => re.test(rel))) continue;
 
     const abs = path.join(root, rel);

@@ -131,12 +131,17 @@ pass 'undo restored all files byte-identical'
 
 # -------------------------------------------- non-git dir + docs exclusion
 
-PLAIN="$SANDBOX/plain"
-mkdir -p "$PLAIN/docs"
+# Outside the sandbox: the sandbox may live inside a git checkout of
+# mdsweep itself, and this test needs a genuinely git-free directory.
+PLAINTMP="$(mktemp -d)"
+trap 'rm -rf "$PLAINTMP"' EXIT
+PLAIN="$PLAINTMP/plain"
+mkdir -p "$PLAIN/docs" "$PLAIN/content"
 printf '# Status\nold status dump\n' > "$PLAIN/STATUS.md"
 printf '# API\nreal docs\n' > "$PLAIN/docs/api.md"
-touch "$PLAIN/mkdocs.yml"
-touch -m -t "$OLD_STAMP" "$PLAIN/STATUS.md" "$PLAIN/docs/api.md"
+printf -- '---\nauthor: claude\n---\npublished post\n' > "$PLAIN/content/post.md"
+touch "$PLAIN/mkdocs.yml" "$PLAIN/astro.config.mjs"
+touch -m -t "$OLD_STAMP" "$PLAIN/STATUS.md" "$PLAIN/docs/api.md" "$PLAIN/content/post.md"
 node "$CLI" scan "$PLAIN" --json 2> "$SANDBOX/plain-warn.txt" > "$SANDBOX/plain.json"
 grep -q 'not a git repository' "$SANDBOX/plain-warn.txt" || die 'non-git warning missing'
 PLAIN_JSON="$SANDBOX/plain.json" node --input-type=module - <<'EOF'
@@ -150,6 +155,7 @@ const ok = (cond, msg) => {
 ok(paths.includes('STATUS.md'), 'non-git: STATUS.md flagged by name');
 ok(d.files.find((f) => f.path === 'STATUS.md').grade === 'orphan', 'non-git: STATUS.md orphan by mtime');
 ok(!paths.includes('docs/api.md'), 'docs/ excluded when mkdocs.yml present');
+ok(!paths.includes('content/post.md'), 'content/ excluded when astro config present');
 EOF
 
 # ------------------------------------------------------------ error paths
