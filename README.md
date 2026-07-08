@@ -32,7 +32,7 @@ because they are all in active use.
 Clone and run. It is a single file with no dependencies:
 
 ```sh
-git clone https://github.com/USER/mdsweep && cd mdsweep
+git clone https://github.com/szp2005/mdsweep && cd mdsweep
 node bin/mdsweep.mjs scan ~/code/my-repo
 ```
 
