@@ -2,6 +2,10 @@
 
 Sweep up the markdown your coding agents leave behind.
 
+> Personal tool, shared as-is. I built it to keep my own repos tidy and it does
+> that job. Not actively maintained for a wider audience — no roadmap, issues
+> answered when I have time. Fork freely.
+
 If you run Claude Code (or any coding agent) daily, your repos accumulate
 `SUMMARY.md`, `PLAN.md`, `HANDOFF.md`, `FINDINGS_V2.md`: session artifacts that
 were useful for exactly one task. The real cost is not disk space. Future
