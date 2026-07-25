@@ -1,0 +1,34 @@
+name: Publish to npm
+
+# Trusted Publishing (OIDC): npm verifies this workflow's identity directly,
+# so no NPM_TOKEN secret is stored anywhere. Requires the package's npm settings
+# to trust szp2005/mdsweep + this workflow file.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:        # lets you publish manually from the Actions tab
+
+permissions:
+  contents: read
+  id-token: write           # required: lets the runner mint the OIDC token npm checks
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      # Trusted Publishing needs npm >= 11.5.1; the runner ships an older one.
+      - name: Update npm
+        run: npm install -g npm@latest
+
+      - name: Smoke test
+        run: npm test
+
+      - name: Publish
+        run: npm publish
