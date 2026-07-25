@@ -26,5 +26,14 @@
     "cli",
     "repo-hygiene"
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "author": "szp2005",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/szp2005/mdsweep.git"
+  },
+  "homepage": "https://github.com/szp2005/mdsweep#readme",
+  "bugs": {
+    "url": "https://github.com/szp2005/mdsweep/issues"
+  }
 }
