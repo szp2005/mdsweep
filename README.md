@@ -111,7 +111,10 @@ also skipped.
    `--apply` is a dry-run.
 2. **Never deletes.** Quarantine *moves* files into
    `.mdsweep/trash/<timestamp>/`, preserving relative paths, with a manifest.
-   Only `orphan`-graded files are ever moved.
+   Only `orphan`-graded files are ever moved. Each manifest entry records where
+   the file came from and why it was moved: its `signals` (what marked it as
+   agent output), its `ageDays` against the batch's `days` threshold, and its
+   `refs` count, so a restored file can be judged without re-running the scan.
 3. **One-command undo.** `mdsweep undo` restores the most recent batch
    byte-identical. Files whose original location is now occupied are left
    safely in the trash.

@@ -118,6 +118,17 @@ if (JSON.stringify(paths) !== JSON.stringify(want)) {
   process.exit(1);
 }
 console.log('ok - manifest lists exactly the 3 orphans');
+for (const f of m.files) {
+  if (f.refs !== 0) {
+    console.error(`FAIL: ${f.path} records refs ${f.refs}, want 0 (an orphan has no inbound reference)`);
+    process.exit(1);
+  }
+  if (!Array.isArray(f.signals) || typeof f.ageDays !== 'number') {
+    console.error(`FAIL: ${f.path} is missing the signals/ageDays that explain why it moved`);
+    process.exit(1);
+  }
+}
+console.log('ok - each entry records why it moved (refs, ageDays, signals)');
 EOF
 pass 'quarantine --apply moved only orphans'
 

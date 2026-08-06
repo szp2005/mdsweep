@@ -520,7 +520,7 @@ function cmdQuarantine(root, opts) {
     try {
       fs.mkdirSync(path.dirname(dest), { recursive: true });
       fs.renameSync(path.join(root, h.rel), dest);
-      moved.push({ path: h.rel, size: h.size, signals: h.signals, ageDays: Math.floor(h.ageDays) });
+      moved.push({ path: h.rel, size: h.size, signals: h.signals, ageDays: Math.floor(h.ageDays), refs: h.refs });
     } catch (err) {
       console.error(`warning: could not move ${h.rel}: ${err.code || err.message}`);
     }
