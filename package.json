@@ -35,5 +35,8 @@
   "homepage": "https://github.com/szp2005/mdsweep#readme",
   "bugs": {
     "url": "https://github.com/szp2005/mdsweep/issues"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

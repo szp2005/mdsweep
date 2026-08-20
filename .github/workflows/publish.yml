@@ -23,12 +23,40 @@ jobs:
           node-version: 22
           registry-url: https://registry.npmjs.org
 
+      - name: Check whether the package exists
+        id: package
+        run: |
+          if output=$(npm view mdsweep version 2>&1); then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          elif grep -q "E404" <<< "$output"; then
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "$output"
+            exit 1
+          fi
+
       # Trusted Publishing needs npm >= 11.5.1; the runner ships an older one.
       - name: Update npm
+        if: steps.package.outputs.exists == 'true'
         run: npm install -g npm@latest
 
       - name: Smoke test
         run: npm test
 
-      - name: Publish
+      # A package cannot trust this workflow until its first version exists.
+      # Bootstrap once with a granular NPM_TOKEN, then configure Trusted
+      # Publishing on npmjs.com and remove the secret.
+      - name: Bootstrap first publish
+        if: steps.package.outputs.exists != 'true'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "::error::First publish requires a one-time NPM_TOKEN repository secret"
+            exit 1
+          fi
+          npm publish --access public --provenance
+
+      - name: Publish with OIDC
+        if: steps.package.outputs.exists == 'true'
         run: npm publish
