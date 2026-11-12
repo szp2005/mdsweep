@@ -67,7 +67,7 @@ Flagged 4: 2 orphan (16K) · 1 stale · 1 active
 `--json` gives the same data machine-readable. `--days N` changes the
 "active" window (default 14).
 
-<!-- DEMO_GIF -->
+![mdsweep scan, quarantine dry-run, apply, and undo on a sample repo](docs/demo.gif)
 
 ## How files are graded
 
@@ -118,6 +118,21 @@ also skipped.
 3. **One-command undo.** `mdsweep undo` restores the most recent batch
    byte-identical. Files whose original location is now occupied are left
    safely in the trash.
+
+## How it compares
+
+Most tools in this space either delete finished plans or are skills that live
+inside one agent. mdsweep is a standalone CLI that never deletes and only
+touches files nothing else references.
+
+| Tool | Form | What happens to old files |
+|---|---|---|
+| mdsweep | single-file Node CLI + optional Claude Code skill | orphans moved to `.mdsweep/trash/`, one-command undo |
+| [ccplan](https://github.com/sorafujitani/ccplan) | CLI for `.claude/plans/*.md` | deleted by status and age (`--dry-run` available) |
+| [doc-cleanup](https://github.com/aka-luan/doc-cleanup) | agent skill | agent audits docs, archives finished content |
+
+mdsweep decides by references, not by a status tag you have to maintain:
+a stale plan that `CLAUDE.md` still points at is shown but never moved.
 
 ## Configuration
 
