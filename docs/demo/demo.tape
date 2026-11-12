@@ -1,5 +1,6 @@
 # Record the README demo.
-# Rebuild the sample repo first so the grades match this GIF:
+# Check out this repo at /home/demo/mdsweep (a neutral path, not the
+# machine workspace) and rebuild the sample repo so the grades match:
 #   sh docs/demo/setup.sh
 # Visible commands, in order: scan, quarantine dry-run, quarantine --apply,
 # then undo from inside the fixture.
@@ -20,6 +21,8 @@ Set Theme "Catppuccin Mocha"
 
 Hide
 Type "export PS1='$ '"
+Enter
+Type "cd /home/demo/mdsweep"
 Enter
 Type "clear"
 Enter
