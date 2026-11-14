@@ -17,7 +17,7 @@ git add README.md CLAUDE.md
 GIT_AUTHOR_DATE="$OLD_ROOT" GIT_COMMITTER_DATE="$OLD_ROOT" \
   git commit -qm "initial project"
 
-git add SUMMARY.md PLAN_auth.md
+git add SUMMARY.md PLAN_auth.md CHECKLIST.md
 GIT_AUTHOR_DATE="$OLD_ARTIFACTS" GIT_COMMITTER_DATE="$OLD_ARTIFACTS" \
   git commit -qm "$(printf '%s\n\n%s\n' 'add session artifacts' 'Co-Authored-By: Claude <noreply@anthropic.com>')"
 
@@ -26,4 +26,4 @@ git commit -qm "add handoff note"
 
 # Grade uses the later of mtime and last commit. Commit dates alone leave
 # the working tree looking new, so the two old artifacts are backdated here.
-touch -m -d "$OLD_ARTIFACTS" SUMMARY.md PLAN_auth.md
+touch -m -d "$OLD_ARTIFACTS" SUMMARY.md PLAN_auth.md CHECKLIST.md

@@ -4,7 +4,8 @@
  * artifacts (SUMMARY.md, PLAN.md, scratch notes...) cluttering a repo.
  *
  * Single file, zero dependencies, Node >= 18.
- * Read-only by default. Never deletes. `mdsweep undo` reverses quarantine.
+ * Read-only by default. Never deletes. `mdsweep undo` reverses the most
+ * recent quarantine or archive batch.
  */
 
 import fs from 'node:fs';
@@ -250,6 +251,9 @@ function generatorOwnedDirs(root) {
 
 const FM_KEY = /^(generated|generator|generated[-_]?by|created[-_]?by|author|tool|source|producer)\s*:\s*(.+)$/i;
 const FM_VAL = /claude|agent|assistant|copilot|gpt|llm|\bai\b|generated|true/i;
+const FM_STATUS = /^status\s*:\s*(.*)$/i;
+// Opt-in archive only. A STATUS* filename or the word in body text is not a status.
+const COMPLETED_STATUS = new Set(['done', 'completed', 'archived', 'closed']);
 
 function frontmatterGenerated(abs) {
   let fd;
@@ -272,6 +276,43 @@ function frontmatterGenerated(abs) {
     if (m && FM_VAL.test(m[2])) return true;
   }
   return false;
+}
+
+// First YAML `status:` scalar in the opening frontmatter block, or null.
+// Quotes and a trailing ` # comment` are stripped. Not a detection signal.
+function normalizeStatusValue(raw) {
+  let v = raw.trim();
+  const hash = v.search(/\s+#/);
+  if (hash !== -1) v = v.slice(0, hash).trim();
+  if (v.length >= 2) {
+    const q = v[0];
+    if ((q === '"' || q === "'") && v.endsWith(q)) v = v.slice(1, -1).trim();
+  }
+  if (!v) return null;
+  return v.split(/\s+/)[0].toLowerCase();
+}
+
+function frontmatterStatus(abs) {
+  let fd;
+  let head;
+  try {
+    fd = fs.openSync(abs, 'r');
+    const buf = Buffer.alloc(4096);
+    const n = fs.readSync(fd, buf, 0, 4096, 0);
+    head = buf.subarray(0, n).toString('utf8');
+  } catch {
+    return null;
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+  }
+  if (!head.startsWith('---')) return null;
+  const end = head.indexOf('\n---', 3);
+  if (end === -1) return null;
+  for (const line of head.slice(3, end).split('\n')) {
+    const m = FM_STATUS.exec(line.trim());
+    if (m) return normalizeStatusValue(m[1]);
+  }
+  return null;
 }
 
 // --------------------------------------------------------------------- scan
@@ -539,44 +580,153 @@ function cmdQuarantine(root, opts) {
   if (!giHasEntry) console.log('Tip: add ".mdsweep/" to your .gitignore');
 }
 
-// --------------------------------------------------------------------- undo
+// ------------------------------------------------------------------ archive
 
-function cmdUndo(root) {
-  const trashRoot = path.join(root, '.mdsweep', 'trash');
-  let entries = [];
-  try {
-    entries = fs.readdirSync(trashRoot).sort().reverse();
-  } catch {
-    fail(`nothing to undo — no quarantine history at ${trashRoot}`);
+function cmdArchive(root, opts) {
+  const result = runScan(root, opts);
+  printNotes(result);
+  const completed = [];
+  for (const h of result.hits) {
+    const baseLower = h.base.toLowerCase();
+    // Scan already skips these. Checked again so archive cannot move them
+    // even if a future grading change lets one through.
+    if (PROTECTED_BASENAMES.has(baseLower) || baseLower.startsWith('license')) continue;
+    const status = frontmatterStatus(path.join(root, h.rel));
+    if (!status || !COMPLETED_STATUS.has(status)) continue;
+    completed.push({ ...h, status });
   }
 
-  let batchDir = null;
-  let manifest = null;
-  for (const e of entries) {
-    const m = path.join(trashRoot, e, 'manifest.json');
-    if (fs.existsSync(m)) {
-      try {
-        manifest = JSON.parse(fs.readFileSync(m, 'utf8'));
-        batchDir = path.join(trashRoot, e);
-        break;
-      } catch (err) {
-        fail(`corrupt manifest at ${m}: ${err.message}`);
-      }
+  const movable = completed.filter((h) => h.grade === 'orphan');
+  const referenced = completed.filter((h) => h.grade === 'stale');
+  const active = completed.filter((h) => h.grade === 'active');
+
+  if (!completed.length) {
+    console.log('Nothing to archive — no completed artifacts found.');
+    return;
+  }
+
+  if (movable.length) {
+    printTable(movable);
+    console.log('');
+  }
+  if (referenced.length) {
+    console.log('Referenced, left in place:');
+    for (const h of referenced) {
+      console.log(`  ${h.rel}  (${h.refs} ref${h.refs === 1 ? '' : 's'}, status: ${h.status})`);
     }
   }
-  if (!manifest) fail('nothing to undo — no manifest found in .mdsweep/trash/');
+  if (active.length) {
+    console.log('Still active, left in place:');
+    for (const h of active) console.log(`  ${h.rel}  (status: ${h.status})`);
+  }
+  if (referenced.length || active.length) console.log('');
+
+  if (!movable.length) {
+    console.log('Nothing to archive — completed files are referenced or still active.');
+    return;
+  }
+
+  const total = movable.reduce((n, h) => n + h.size, 0);
+  if (!opts.apply) {
+    console.log('DRY RUN — nothing was moved.');
+    console.log(`Would move ${movable.length} completed file(s) (${fmtSize(total)}) into .mdsweep/archive/`);
+    if (referenced.length) {
+      console.log(`${referenced.length} referenced file(s) shown but left in place.`);
+    }
+    console.log('Re-run with --apply to move them. Restore any time with: mdsweep undo');
+    return;
+  }
+
+  const stamp = new Date().toISOString().replace(/:/g, '-').replace(/\.\d+Z$/, 'Z');
+  const archiveDir = path.join(root, '.mdsweep', 'archive', stamp);
+  const moved = [];
+  for (const h of movable) {
+    const dest = path.join(archiveDir, h.rel);
+    try {
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      fs.renameSync(path.join(root, h.rel), dest);
+      moved.push({
+        path: h.rel,
+        size: h.size,
+        signals: h.signals,
+        ageDays: Math.floor(h.ageDays),
+        refs: h.refs,
+        status: h.status,
+      });
+    } catch (err) {
+      console.error(`warning: could not move ${h.rel}: ${err.code || err.message}`);
+    }
+  }
+  if (!moved.length) {
+    try { fs.rmSync(archiveDir, { recursive: true, force: true }); } catch { /* best effort */ }
+    fail('no files could be moved');
+  }
+  const manifest = {
+    version: 1,
+    action: 'archive',
+    createdAt: new Date().toISOString(),
+    root,
+    days: result.days,
+    files: moved,
+  };
+  fs.writeFileSync(path.join(archiveDir, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+  console.log(`Moved ${moved.length} file(s) (${fmtSize(total)}) to ${path.relative(process.cwd(), archiveDir) || archiveDir}`);
+  console.log('Nothing was deleted. Restore everything with: mdsweep undo');
+  const gi = path.join(root, '.gitignore');
+  let giHasEntry = false;
+  try { giHasEntry = fs.readFileSync(gi, 'utf8').includes('.mdsweep'); } catch { /* no .gitignore */ }
+  if (!giHasEntry) console.log('Tip: add ".mdsweep/" to your .gitignore');
+}
+
+// --------------------------------------------------------------------- undo
+
+function listBatches(root) {
+  const found = [];
+  for (const kind of ['trash', 'archive']) {
+    const base = path.join(root, '.mdsweep', kind);
+    let entries;
+    try { entries = fs.readdirSync(base); } catch { continue; }
+    for (const e of entries) {
+      const batchDir = path.join(base, e);
+      const manifestPath = path.join(batchDir, 'manifest.json');
+      if (!fs.existsSync(manifestPath)) continue;
+      let mtime = 0;
+      try { mtime = fs.statSync(manifestPath).mtimeMs; } catch { /* stamp breaks the tie */ }
+      found.push({ kind, stamp: e, batchDir, manifestPath, mtime });
+    }
+  }
+  found.sort((a, b) => (b.mtime - a.mtime) || (a.stamp < b.stamp ? 1 : a.stamp > b.stamp ? -1 : 0));
+  return found;
+}
+
+function cmdUndo(root) {
+  const batches = listBatches(root);
+  if (!batches.length) {
+    fail(`nothing to undo — no quarantine or archive history under ${path.join(root, '.mdsweep')}`);
+  }
+
+  // Newest manifest wins, whether that batch was a quarantine or an archive.
+  // A corrupt newest manifest is an error, same as before: don't skip past it.
+  const { kind, batchDir, manifestPath } = batches[0];
+  let manifest;
+  try {
+    manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  } catch (err) {
+    fail(`corrupt manifest at ${manifestPath}: ${err.message}`);
+  }
 
   const remaining = [];
   let restored = 0;
   for (const f of manifest.files) {
     const src = path.join(batchDir, f.path);
     const dest = path.join(root, f.path);
+    const place = kind === 'archive' ? 'archive' : 'trash';
     if (!fs.existsSync(src)) {
-      console.error(`warning: missing from trash, skipped: ${f.path}`);
+      console.error(`warning: missing from ${place}, skipped: ${f.path}`);
       continue;
     }
     if (fs.existsSync(dest)) {
-      console.error(`warning: ${f.path} already exists in repo, left in trash`);
+      console.error(`warning: ${f.path} already exists in repo, left in ${place}`);
       remaining.push(f);
       continue;
     }
@@ -596,7 +746,8 @@ function cmdUndo(root) {
     console.log(`Restored ${restored} file(s); ${remaining.length} left in ${batchDir}`);
   } else {
     fs.rmSync(batchDir, { recursive: true, force: true });
-    console.log(`Restored ${restored} file(s) from ${path.basename(batchDir)} — quarantine fully undone.`);
+    const label = kind === 'archive' ? 'archive' : 'quarantine';
+    console.log(`Restored ${restored} file(s) from ${path.basename(batchDir)} — ${label} fully undone.`);
   }
 }
 
@@ -608,17 +759,19 @@ function printHelp() {
 Usage:
   mdsweep [scan] [path] [--days N] [--json]
   mdsweep quarantine [path] [--days N] [--apply]
+  mdsweep archive [path] [--days N] [--apply]
   mdsweep undo [path]
 
 Commands:
   scan        Find and grade artifacts (default; read-only)
   quarantine  Move orphaned artifacts into .mdsweep/trash/ (dry-run unless --apply)
-  undo        Restore the most recent quarantine batch
+  archive     Move completed artifacts into .mdsweep/archive/ (dry-run unless --apply)
+  undo        Restore the most recent quarantine or archive batch
 
 Options:
   --days N    "Active" threshold in days (default ${DEFAULT_DAYS})
   --json      Machine-readable scan output
-  --apply     Actually move files (quarantine only)
+  --apply     Actually move files (quarantine and archive)
   --version   Print version
   -h, --help  Show this help
 
@@ -627,8 +780,15 @@ Grades:
   stale    old, but another file in the repo still references it
   orphan   old and unreferenced — the only quarantine candidates
 
-mdsweep never deletes anything. Quarantine moves files (paths preserved)
-into .mdsweep/trash/<timestamp>/ with a manifest; undo puts them back.
+archive is opt-in and is not part of npm mdsweep@0.1.0. It moves a file
+only when scan already flags it, its YAML frontmatter status is done,
+completed, archived, or closed, and it is an orphan. Referenced files are
+shown and left in place. Protected names are never archived.
+
+mdsweep never deletes anything. Quarantine moves files into
+.mdsweep/trash/<timestamp>/ and archive moves files into
+.mdsweep/archive/<timestamp>/ (paths preserved, with a manifest).
+undo puts the most recent of those batches back.
 Configuration lives in .mdsweep.json — see the README.`);
 }
 
@@ -662,7 +822,7 @@ function main() {
   }
 
   let cmd = 'scan';
-  if (positional.length && ['scan', 'quarantine', 'undo', 'help'].includes(positional[0])) {
+  if (positional.length && ['scan', 'quarantine', 'archive', 'undo', 'help'].includes(positional[0])) {
     cmd = positional.shift();
   }
   if (cmd === 'help') {
@@ -678,6 +838,7 @@ function main() {
 
   if (cmd === 'scan') cmdScan(root, opts);
   else if (cmd === 'quarantine') cmdQuarantine(root, opts);
+  else if (cmd === 'archive') cmdArchive(root, opts);
   else cmdUndo(root);
 }
 

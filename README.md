@@ -32,14 +32,23 @@ because they are all in active use.
 
 ## Install
 
-Clone and run. It is a single file with no dependencies:
+One file, zero dependencies. Requires Node 18+. Git is optional but recommended
+(better signals).
+
+npm currently installs **0.1.0**, which includes `scan`, `quarantine`, and
+`undo` only. **`archive` is new on `main` and is not part of npm `mdsweep@0.1.0`.**
+Until a future npm release, run `archive` from a checkout of `main` with
+`node bin/mdsweep.mjs`.
 
 ```sh
+npm install -g mdsweep
+mdsweep scan ~/code/my-repo
+
+npx mdsweep scan ~/code/my-repo
+
 git clone https://github.com/szp2005/mdsweep && cd mdsweep
 node bin/mdsweep.mjs scan ~/code/my-repo
 ```
-
-Requires Node 18+. Git is optional but recommended (better signals).
 
 ## Usage
 
@@ -47,8 +56,22 @@ Requires Node 18+. Git is optional but recommended (better signals).
 mdsweep scan [path]          # find and grade artifacts (read-only, default)
 mdsweep quarantine [path]    # dry-run: show what would be moved
 mdsweep quarantine --apply   # move orphans into .mdsweep/trash/<timestamp>/
-mdsweep undo                 # put everything back
+mdsweep archive [path]       # NEW, not in npm 0.1.0. Dry-run: completed files
+mdsweep archive --apply      # move completed orphans into .mdsweep/archive/<timestamp>/
+mdsweep undo                 # put the newest quarantine or archive batch back
 ```
+
+`archive` is **new** and is **not** part of npm `mdsweep@0.1.0`. It is opt-in
+and a dry-run unless you pass `--apply`. A file is completed when its YAML
+frontmatter `status` is `done`, `completed`, `archived`, or `closed`
+(any case). The file must already be flagged as an agent artifact. A
+`STATUS*` filename, or the word "done" in body text, is not a status.
+Protected names are never archived. A completed file that another file still
+references is listed and left in place, same as `stale`. Files inside the
+active window (`--days`, default 14) are left in place too. Nothing is
+deleted: `--apply` moves files to `.mdsweep/archive/<timestamp>/` with a
+manifest, and `mdsweep undo` restores the newest batch whether it came from
+quarantine or archive.
 
 Example scan:
 
@@ -67,7 +90,7 @@ Flagged 4: 2 orphan (16K) · 1 stale · 1 active
 `--json` gives the same data machine-readable. `--days N` changes the
 "active" window (default 14).
 
-![mdsweep scan, quarantine dry-run, apply, and undo on a sample repo](docs/demo.gif)
+![mdsweep scan, archive, quarantine, and undo on a sample repo](docs/demo.gif)
 
 ## How files are graded
 
@@ -107,17 +130,19 @@ also skipped.
 
 ## Safety guarantees
 
-1. **Read-only by default.** `scan` writes nothing. `quarantine` without
-   `--apply` is a dry-run.
-2. **Never deletes.** Quarantine *moves* files into
-   `.mdsweep/trash/<timestamp>/`, preserving relative paths, with a manifest.
-   Only `orphan`-graded files are ever moved. Each manifest entry records where
-   the file came from and why it was moved: its `signals` (what marked it as
-   agent output), its `ageDays` against the batch's `days` threshold, and its
-   `refs` count, so a restored file can be judged without re-running the scan.
+1. **Read-only by default.** `scan` writes nothing. `quarantine` and `archive`
+   without `--apply` are dry-runs and do not create `.mdsweep`.
+2. **Never deletes.** Quarantine *moves* orphans into
+   `.mdsweep/trash/<timestamp>/`. Archive *moves* completed orphans into
+   `.mdsweep/archive/<timestamp>/`. Both preserve relative paths and write a
+   manifest. Only `orphan`-graded files are ever moved. Each manifest entry
+   records where the file came from and why it was moved: its `signals` (what
+   marked it as agent output), its `ageDays` against the batch's `days`
+   threshold, and its `refs` count. Archive entries also record the frontmatter
+   `status`, so a restored file can be judged without re-running the scan.
 3. **One-command undo.** `mdsweep undo` restores the most recent batch
-   byte-identical. Files whose original location is now occupied are left
-   safely in the trash.
+   byte-identical, whether that batch was a quarantine or an archive.
+   Files whose original location is now occupied stay in the batch.
 
 ## How it compares
 
@@ -127,12 +152,14 @@ touches files nothing else references.
 
 | Tool | Form | What happens to old files |
 |---|---|---|
-| mdsweep | single-file Node CLI + optional Claude Code skill | orphans moved to `.mdsweep/trash/`, one-command undo |
+| mdsweep | single-file Node CLI + optional Claude Code skill | orphans moved to `.mdsweep/trash/`; optional `archive` moves completed files to `.mdsweep/archive/`; one-command undo |
 | [ccplan](https://github.com/sorafujitani/ccplan) | CLI for `.claude/plans/*.md` | deleted by status and age (`--dry-run` available) |
 | [doc-cleanup](https://github.com/aka-luan/doc-cleanup) | agent skill | agent audits docs, archives finished content |
 
-mdsweep decides by references, not by a status tag you have to maintain:
-a stale plan that `CLAUDE.md` still points at is shown but never moved.
+References stay the default. Optional status-based archiving (`mdsweep archive`,
+new on `main`, not in npm `mdsweep@0.1.0`) still never moves a file another
+file references: a stale plan that `CLAUDE.md` still points at is shown but
+never moved.
 
 ## Configuration
 
