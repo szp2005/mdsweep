@@ -9,6 +9,14 @@ mdsweep finds markdown artifacts left behind by agent sessions, grades them
 (`active` / `stale` / `orphan`), and can move orphans into a reversible
 quarantine. It never deletes files.
 
+**`archive` is new and is not part of npm `mdsweep@0.1.0`.** `npx mdsweep`
+and `npm install -g mdsweep` install 0.1.0 (`scan`, `quarantine`, `undo`
+only). Run `archive` from a checkout of main:
+
+```sh
+node bin/mdsweep.mjs archive [path]
+```
+
 ## When to run it
 
 - The repo root or subdirectories contain accumulating `SUMMARY.md`,
@@ -25,7 +33,8 @@ quarantine. It never deletes files.
    mdsweep scan [path] --json
    ```
 
-   If mdsweep is not installed: `npx mdsweep scan [path] --json`.
+   If mdsweep is not installed: `npx mdsweep scan [path] --json` runs npm
+   `mdsweep@0.1.0`, which has no `archive` command.
 
 2. **Interpret the grades.**
    - `active` — touched in the last 14 days (`--days` to adjust). Leave alone.
@@ -38,7 +47,28 @@ quarantine. It never deletes files.
      co-authored commit, untracked, generated frontmatter). Mention this when
      summarizing.
 
-3. **Before quarantining, show the user the exact list.** Present every
+3. **Archive is optional, new, and not in npm 0.1.0.** Use it only when the
+   user wants completed artifacts put away, and only via a checkout of main
+   (`node bin/mdsweep.mjs`). A file is completed when YAML frontmatter
+   `status` is `done`, `completed`, `archived`, or `closed` (any case). It
+   must already be an agent artifact from the scan, and it must be an orphan
+   (older than `--days`, zero inbound references). A `STATUS*` filename or
+   the word "done" in body text is not a status. Protected names
+   (`README.md`, `CLAUDE.md`, `SKILL.md`, and the rest of the protected set)
+   are never archived. Referenced files are shown and not moved.
+
+   Show the dry-run and get explicit confirmation before `--apply`. Never
+   archive a file the user has not seen in the list.
+
+   ```sh
+   node bin/mdsweep.mjs archive [path]          # dry-run; writes nothing
+   node bin/mdsweep.mjs archive [path] --apply  # moves completed orphans
+   ```
+
+   Files move to `.mdsweep/archive/<timestamp>/` with a manifest. Nothing is
+   deleted.
+
+4. **Before quarantining, show the user the exact list.** Present every
    orphan (path, size, age) and get explicit confirmation. Never run
    `--apply` without the user approving the specific file list in this
    conversation. When in doubt, run the dry-run and show its output:
@@ -47,26 +77,32 @@ quarantine. It never deletes files.
    mdsweep quarantine [path]        # dry-run, prints what would move
    ```
 
-4. **Quarantine only after approval.**
+5. **Quarantine only after approval.**
 
    ```sh
    mdsweep quarantine [path] --apply
    ```
 
    Files move to `.mdsweep/trash/<timestamp>/` with a manifest; nothing is
-   deleted. Suggest adding `.mdsweep/` to `.gitignore`.
+   deleted. Suggest adding `.mdsweep/` to `.gitignore`. Quarantine behavior
+   is unchanged: it still moves every orphan, not only completed files.
 
-5. **If anything was moved by mistake:**
+6. **If anything was moved by mistake:**
 
    ```sh
    mdsweep undo [path]
    ```
 
-   restores the most recent batch byte-identical.
+   restores the most recent batch byte-identical, whether that batch was a
+   quarantine or an archive.
 
 ## Hard rules
 
-- Never quarantine without showing the list and getting user confirmation.
-- Never quarantine `stale` or `active` files by hand; only mdsweep-graded
-  orphans, only via mdsweep (so undo works).
-- Never delete files from `.mdsweep/trash/` — that is the user's decision.
+- Never quarantine or archive without showing the list and getting user confirmation.
+- Never quarantine or archive `stale` or `active` files by hand; only
+  mdsweep-graded orphans, only via mdsweep (so undo works).
+- Never treat a status tag as a reason to quarantine. `archive` is the only
+  command that reads `status`, and it still refuses referenced files.
+- Never delete files from `.mdsweep/trash/` or `.mdsweep/archive/` — that is
+  the user's decision.
+- Do not tell the user that `npx mdsweep` can archive. That package is 0.1.0.

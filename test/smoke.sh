@@ -177,5 +177,206 @@ fi
 grep -q 'path not found' "$SANDBOX/err.txt" || die 'friendly missing-path error expected'
 pass 'missing path fails with friendly error'
 
+node "$CLI" --help > "$SANDBOX/help.txt"
+grep -q 'mdsweep archive' "$SANDBOX/help.txt" || die 'help should document archive'
+pass 'help documents archive'
+
+# ------------------------------------------------------------------- archive
+# Separate repo so the quarantine cases above stay a pure before/after.
+
+ARCH="$SANDBOX/archive-repo"
+mkdir -p "$ARCH/docs"
+cd "$ARCH"
+git init -q -b main
+git config user.email "smoke@example.com"
+git config user.name "Smoke Test"
+git config commit.gpgsign false
+
+cat > README.md <<'EOF'
+---
+status: done
+generated_by: claude-code
+---
+# Fixture project
+Human readme. Must never be archived.
+EOF
+cat > CLAUDE.md <<'EOF'
+# Project instructions
+Keep human docs in the README.
+EOF
+# Status alone is not an agent signal: tracked, plain name, human commit.
+cat > finished.md <<'EOF'
+---
+status: done
+---
+# Finished
+Status without an agent signal is not an artifact.
+EOF
+printf -- '---\nstatus: done\n---\n# Handoff\nOld completed handoff. Unreferenced.\n' > docs/HANDOFF.md
+printf -- '---\nstatus: "completed"\n---\n# Scratch\nQuoted completed status.\n' > SCRATCH.md
+printf -- '---\nstatus: archived\n---\n# Analysis\nArchived status value.\n' > ANALYSIS.md
+printf -- '---\nstatus: Closed\n---\n# Debug\nClosed, any case.\n' > DEBUG_session.md
+printf -- '---\nstatus: in-progress\n---\n# Final notes\nNot a completed status.\n' > FINAL_notes.md
+printf '# Findings\nOrphan with no status tag.\n' > FINDINGS.md
+printf '# Status\nEverything is done.\nstatus: done\n' > STATUS.md
+printf '# Report\n\nThis work is done.\nSomeone wrote status: done in the body.\n' > REPORT_done.md
+printf -- '---\nstatus: done\n---\n# Draft\nFresh completed draft.\n' > DRAFT_fresh.md
+
+git add README.md CLAUDE.md finished.md docs/HANDOFF.md SCRATCH.md ANALYSIS.md \
+  DEBUG_session.md FINAL_notes.md
+GIT_AUTHOR_DATE="$OLD_DATE" GIT_COMMITTER_DATE="$OLD_DATE" git commit -qm 'old project files'
+
+# Untracked on purpose (that signal flags them). DRAFT_fresh stays new.
+touch -m -t "$OLD_STAMP" README.md CLAUDE.md finished.md docs/HANDOFF.md \
+  SCRATCH.md ANALYSIS.md DEBUG_session.md FINAL_notes.md \
+  FINDINGS.md STATUS.md REPORT_done.md
+
+# (e) a wide active window writes nothing, then a normal dry-run writes nothing.
+node "$CLI" archive "$ARCH" --days 100000 > "$SANDBOX/archive-days.txt"
+[ -f "$ARCH/docs/HANDOFF.md" ] || die 'wide --days must not move files'
+[ ! -d "$ARCH/.mdsweep" ] || die 'wide --days must not create .mdsweep'
+grep -q 'Nothing to archive' "$SANDBOX/archive-days.txt" || die 'wide --days should archive nothing'
+pass 'archive --days leaves files inside the active window'
+
+node "$CLI" archive "$ARCH" > "$SANDBOX/archive-dry.txt"
+grep -q 'DRY RUN' "$SANDBOX/archive-dry.txt" || die 'archive dry-run banner missing'
+grep -q 'docs/HANDOFF.md' "$SANDBOX/archive-dry.txt" || die 'dry-run should list the completed file'
+[ -f "$ARCH/docs/HANDOFF.md" ] || die 'archive dry-run must not move files'
+[ -f "$ARCH/FINDINGS.md" ] || die 'archive dry-run must not move a status-less orphan'
+[ -f "$ARCH/README.md" ] || die 'archive dry-run must not move a protected file'
+[ ! -d "$ARCH/.mdsweep" ] || die 'archive without --apply must not create .mdsweep'
+pass 'archive defaults to dry-run and creates no .mdsweep'
+
+node "$CLI" scan "$ARCH" --json > "$SANDBOX/archive-scan.json"
+ARCHIVE_SCAN="$SANDBOX/archive-scan.json" node --input-type=module - <<'EOF'
+import fs from 'node:fs';
+const d = JSON.parse(fs.readFileSync(process.env.ARCHIVE_SCAN, 'utf8'));
+const by = Object.fromEntries(d.files.map((f) => [f.path, f]));
+const ok = (cond, msg) => {
+  if (!cond) { console.error(`FAIL: ${msg}`); process.exit(1); }
+  console.log(`ok - ${msg}`);
+};
+ok(by['docs/HANDOFF.md']?.grade === 'orphan', 'completed HANDOFF graded orphan when unreferenced');
+ok(!by['docs/HANDOFF.md'].signals.some((s) => s === 'status' || s.startsWith('status:')), 'status is not a detection signal');
+ok(!by['README.md'] && !by['CLAUDE.md'], 'protected files stay unflagged with status: done');
+ok(!by['finished.md'], 'status alone does not flag a tracked file');
+ok(by['FINDINGS.md']?.grade === 'orphan', 'status-less FINDINGS stays an orphan');
+ok(by['STATUS.md']?.grade === 'orphan', 'STATUS filename is not a completed tag');
+ok(by['REPORT_done.md']?.grade === 'orphan', 'body text "done" is not a completed tag');
+ok(by['FINAL_notes.md']?.grade === 'orphan', 'status: in-progress is not completed');
+ok(by['DRAFT_fresh.md']?.grade === 'active', 'fresh completed draft stays active');
+ok(by['SCRATCH.md']?.grade === 'orphan', 'quoted completed status still flagged by name');
+EOF
+
+( cd "$ARCH" && shasum README.md docs/HANDOFF.md SCRATCH.md ANALYSIS.md DEBUG_session.md \
+  FINDINGS.md STATUS.md REPORT_done.md FINAL_notes.md finished.md DRAFT_fresh.md \
+  > "$SANDBOX/archive-sums.txt" )
+
+# (a) --apply moves the unreferenced completed file; (d) protected stays;
+# (c) the status-less orphan stays.
+node "$CLI" archive "$ARCH" --apply > "$SANDBOX/archive-apply.txt"
+[ ! -f "$ARCH/docs/HANDOFF.md" ] || die 'unreferenced status: done file should be archived'
+[ ! -f "$ARCH/SCRATCH.md" ] || die 'status: completed should be archived'
+[ ! -f "$ARCH/ANALYSIS.md" ] || die 'status: archived should be archived'
+[ ! -f "$ARCH/DEBUG_session.md" ] || die 'status: Closed should be archived'
+[ -f "$ARCH/FINDINGS.md" ] || die 'orphan with no status tag must not be archived'
+[ -f "$ARCH/STATUS.md" ] || die 'STATUS filename must not be archived'
+[ -f "$ARCH/REPORT_done.md" ] || die 'body text done must not be archived'
+[ -f "$ARCH/FINAL_notes.md" ] || die 'status: in-progress must not be archived'
+[ -f "$ARCH/README.md" ] || die 'protected file with status: done must not be archived'
+[ -f "$ARCH/finished.md" ] || die 'status without an agent signal must not be archived'
+[ -f "$ARCH/DRAFT_fresh.md" ] || die 'fresh completed file must not be archived'
+[ -f "$ARCH/CLAUDE.md" ] || die 'CLAUDE.md must not be archived'
+
+ARCH_BATCH="$(find "$ARCH/.mdsweep/archive" -mindepth 1 -maxdepth 1 -type d)"
+[ -f "$ARCH_BATCH/docs/HANDOFF.md" ] || die 'relative path not preserved in archive'
+[ -f "$ARCH_BATCH/manifest.json" ] || die 'archive manifest.json missing'
+MANIFEST="$ARCH_BATCH/manifest.json" node --input-type=module - <<'EOF'
+import fs from 'node:fs';
+const m = JSON.parse(fs.readFileSync(process.env.MANIFEST, 'utf8'));
+const by = Object.fromEntries(m.files.map((f) => [f.path, f]));
+const paths = Object.keys(by).sort();
+const want = ['ANALYSIS.md', 'DEBUG_session.md', 'SCRATCH.md', 'docs/HANDOFF.md'];
+const ok = (cond, msg) => {
+  if (!cond) { console.error(`FAIL: ${msg}`); process.exit(1); }
+  console.log(`ok - ${msg}`);
+};
+ok(m.action === 'archive', 'archive manifest records action');
+ok(JSON.stringify(paths) === JSON.stringify(want), `manifest lists ${JSON.stringify(paths)}`);
+ok(by['docs/HANDOFF.md'].status === 'done', 'HANDOFF records status done');
+ok(by['SCRATCH.md'].status === 'completed', 'quoted status normalizes to completed');
+ok(by['ANALYSIS.md'].status === 'archived', 'archived status recorded');
+ok(by['DEBUG_session.md'].status === 'closed', 'Closed normalizes to closed');
+for (const f of m.files) {
+  ok(f.refs === 0, `${f.path} archived with refs 0`);
+  ok(Array.isArray(f.signals) && typeof f.ageDays === 'number', `${f.path} records signals and ageDays`);
+}
+EOF
+pass 'archive --apply moved only completed unreferenced artifacts'
+
+# (a) undo puts the archive batch back byte-identical.
+node "$CLI" undo "$ARCH" > "$SANDBOX/archive-undo.txt"
+grep -q 'archive fully undone' "$SANDBOX/archive-undo.txt" || die 'undo should report the archive batch'
+( cd "$ARCH" && shasum -c "$SANDBOX/archive-sums.txt" > /dev/null ) || die 'archive undo is not byte-identical'
+FOUND_ARCH_MANIFESTS="$(find "$ARCH/.mdsweep" -name manifest.json 2>/dev/null | wc -l | tr -d ' ')"
+[ "$FOUND_ARCH_MANIFESTS" = "0" ] || die 'archive manifest should be consumed after full undo'
+pass 'undo restored the archive batch byte-identical'
+
+# (b) the same HANDOFF.md, once CLAUDE.md references it, is shown and not moved.
+printf '\nThe finished handoff is HANDOFF.md.\n' >> "$ARCH/CLAUDE.md"
+node "$CLI" archive "$ARCH" > "$SANDBOX/archive-ref-dry.txt"
+grep -q 'Referenced, left in place' "$SANDBOX/archive-ref-dry.txt" || die 'referenced completed file should be shown'
+grep -q 'docs/HANDOFF.md' "$SANDBOX/archive-ref-dry.txt" || die 'dry-run should name the referenced file'
+FOUND_ARCH_MANIFESTS="$(find "$ARCH/.mdsweep" -name manifest.json 2>/dev/null | wc -l | tr -d ' ')"
+[ "$FOUND_ARCH_MANIFESTS" = "0" ] || die 'archive dry-run must not write a manifest'
+[ -f "$ARCH/docs/HANDOFF.md" ] || die 'dry-run moved the referenced file'
+node "$CLI" archive "$ARCH" --apply > "$SANDBOX/archive-ref-apply.txt"
+[ -f "$ARCH/docs/HANDOFF.md" ] || die 'referenced status: done file must not be archived'
+[ -f "$ARCH/FINDINGS.md" ] || die 'archive --apply moved a status-less orphan'
+[ -f "$ARCH/README.md" ] || die 'archive --apply moved a protected file'
+[ ! -f "$ARCH/SCRATCH.md" ] || die 'unreferenced completed file should still be archived'
+grep -q 'docs/HANDOFF.md' "$SANDBOX/archive-ref-apply.txt" || die 'apply output should show the referenced file'
+REF_MANIFEST="$(find "$ARCH/.mdsweep/archive" -name manifest.json)"
+REF_MANIFEST="$REF_MANIFEST" node --input-type=module - <<'EOF'
+import fs from 'node:fs';
+const m = JSON.parse(fs.readFileSync(process.env.REF_MANIFEST, 'utf8'));
+const paths = m.files.map((f) => f.path);
+const ok = (cond, msg) => {
+  if (!cond) { console.error(`FAIL: ${msg}`); process.exit(1); }
+  console.log(`ok - ${msg}`);
+};
+ok(!paths.includes('docs/HANDOFF.md'), 'referenced HANDOFF is not in the archive manifest');
+ok(paths.includes('SCRATCH.md') && paths.includes('ANALYSIS.md') && paths.includes('DEBUG_session.md'),
+  'other completed orphans were archived');
+EOF
+pass 'referenced completed file is shown and not archived'
+
+# (c) quarantine --apply is unchanged: it still moves the status-less orphan
+# and still leaves the referenced file, the protected file, and the active file.
+sleep 1
+node "$CLI" quarantine "$ARCH" --apply > "$SANDBOX/archive-quarantine.txt"
+[ ! -f "$ARCH/FINDINGS.md" ] || die 'quarantine should still move a status-less orphan'
+[ ! -f "$ARCH/STATUS.md" ] || die 'quarantine should still move STATUS.md (name signal, no status tag)'
+[ ! -f "$ARCH/REPORT_done.md" ] || die 'quarantine should still move a body-only "done" file'
+[ ! -f "$ARCH/FINAL_notes.md" ] || die 'quarantine should still move status: in-progress orphans'
+[ -f "$ARCH/docs/HANDOFF.md" ] || die 'quarantine must not move a referenced file'
+[ -f "$ARCH/README.md" ] || die 'quarantine must not move a protected file'
+[ -f "$ARCH/DRAFT_fresh.md" ] || die 'quarantine must not move an active file'
+[ -f "$ARCH/finished.md" ] || die 'quarantine must not move an unflagged file'
+[ ! -f "$ARCH/SCRATCH.md" ] || die 'quarantine ran against a file archive already moved'
+pass 'quarantine --apply still moves only orphans'
+
+# The quarantine batch is newer, so the first undo restores it and leaves
+# the archive batch in place. The second undo restores the archive.
+node "$CLI" undo "$ARCH" > "$SANDBOX/undo-newest.txt"
+grep -q 'quarantine fully undone' "$SANDBOX/undo-newest.txt" || die 'newest batch should be the quarantine'
+[ -f "$ARCH/FINDINGS.md" ] || die 'first undo should restore the quarantined orphan'
+[ ! -f "$ARCH/SCRATCH.md" ] || die 'first undo should not restore the older archive batch'
+node "$CLI" undo "$ARCH" > "$SANDBOX/undo-archive.txt"
+grep -q 'archive fully undone' "$SANDBOX/undo-archive.txt" || die 'second undo should restore the archive batch'
+[ -f "$ARCH/SCRATCH.md" ] || die 'second undo should restore the archived file'
+( cd "$ARCH" && shasum -c "$SANDBOX/archive-sums.txt" > /dev/null ) || die 'restored archive/quarantine files differ from originals'
+pass 'undo restores the newest quarantine or archive batch, byte-identical'
+
 echo ''
 echo 'ALL SMOKE TESTS PASSED'
